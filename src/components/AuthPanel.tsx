@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { FormEvent } from 'react'
 import type { AuthUser } from '../types/climate'
 
 interface AuthPanelProps {
