@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertsPanel } from '../components/AlertsPanel'
 import { AuthPanel } from '../components/AuthPanel'
-import { CitySelector } from '../components/CitySelector'
-import { ForecastTable } from '../components/ForecastTable'
 import { IndiaMapView } from '../components/IndiaMapView'
-import { MetricCard } from '../components/MetricCard'
-import { indiaCities } from '../data/indiaCities'
 import { findDistrictOverlayByCityId } from '../data/indiaOverlays'
 import { generateRealtimeAlerts, realtimeAlertThresholds } from '../services/alertEngine'
 import {
@@ -16,9 +12,14 @@ import {
   registerUser,
   storeAuthToken,
 } from '../services/backendApi'
+import type { AuthUser, OverlayMetric, RealtimeAlert } from '../types/climate'
+import { CitySelector } from '../components/CitySelector'
+import { ForecastTable } from '../components/ForecastTable'
+import { MetricCard } from '../components/MetricCard'
+import { indiaCities } from '../data/indiaCities'
 import { fetchClimateSnapshot } from '../services/climateApi'
 import type { MetricTone } from '../components/MetricCard'
-import type { AuthUser, ClimateSnapshot, OverlayMetric, RealtimeAlert } from '../types/climate'
+import type { ClimateSnapshot } from '../types/climate'
 
 interface PriorityItem {
   title: string
@@ -49,15 +50,7 @@ const priorities: PriorityItem[] = [
 ]
 
 function sourceLabel(source: ClimateSnapshot['dataSource']): string {
-  if (source === 'live') {
-    return 'Live Open-Meteo feed'
-  }
-
-  if (source === 'backend-cache') {
-    return 'Backend cached feed'
-  }
-
-  return 'Offline baseline estimate'
+  return source === 'live' ? 'Live Open-Meteo feed' : 'Offline baseline estimate'
 }
 
 function metricCards(snapshot: ClimateSnapshot): Array<{
@@ -123,26 +116,8 @@ export default function ClimateDashboard() {
   const [snapshot, setSnapshot] = useState<ClimateSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Map overlay state
-  const [overlayMetric, setOverlayMetric] = useState<OverlayMetric>('heat')
-  const [showStateOverlay, setShowStateOverlay] = useState(true)
-  const [showDistrictOverlay, setShowDistrictOverlay] = useState(true)
-
-  // Alerts state
-  const [alerts, setAlerts] = useState<RealtimeAlert[]>([])
-
-  // Auth state
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
-  const [authLoading, setAuthLoading] = useState(false)
-  const [authError, setAuthError] = useState<string | null>(null)
-
   const selectedCity = useMemo(
     () => indiaCities.find((city) => city.id === selectedCityId) ?? indiaCities[0],
-    [selectedCityId],
-  )
-
-  const districtOverlay = useMemo(
-    () => findDistrictOverlayByCityId(selectedCityId),
     [selectedCityId],
   )
 
@@ -156,7 +131,6 @@ export default function ClimateDashboard() {
 
       if (!isCancelled) {
         setSnapshot(result)
-        setAlerts(generateRealtimeAlerts(result, selectedCity, districtOverlay))
         setIsLoading(false)
       }
     }
@@ -166,55 +140,7 @@ export default function ClimateDashboard() {
     return () => {
       isCancelled = true
     }
-  }, [selectedCity, districtOverlay])
-
-  // Restore auth session from stored token on mount
-  useEffect(() => {
-    const token = getStoredAuthToken()
-
-    if (!token) {
-      return
-    }
-
-    fetchCurrentUser(token)
-      .then((user) => setAuthUser(user))
-      .catch(() => clearStoredAuthToken())
-  }, [])
-
-  async function handleLogin(email: string, password: string) {
-    setAuthLoading(true)
-    setAuthError(null)
-
-    try {
-      const session = await loginUser(email, password)
-      storeAuthToken(session.token)
-      setAuthUser(session.user)
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setAuthLoading(false)
-    }
-  }
-
-  async function handleRegister(name: string, email: string, password: string) {
-    setAuthLoading(true)
-    setAuthError(null)
-
-    try {
-      const session = await registerUser(name, email, password)
-      storeAuthToken(session.token)
-      setAuthUser(session.user)
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Registration failed')
-    } finally {
-      setAuthLoading(false)
-    }
-  }
-
-  function handleLogout() {
-    clearStoredAuthToken()
-    setAuthUser(null)
-  }
+  }, [selectedCity])
 
   const updatedAt = snapshot
     ? new Intl.DateTimeFormat('en-IN', {
@@ -294,36 +220,6 @@ export default function ClimateDashboard() {
             ))}
           </ul>
         </article>
-      </section>
-
-      <section className="map-section reveal delay-3">
-        <IndiaMapView
-          selectedCity={selectedCity}
-          overlayMetric={overlayMetric}
-          showStateOverlay={showStateOverlay}
-          showDistrictOverlay={showDistrictOverlay}
-          onOverlayMetricChange={setOverlayMetric}
-          onToggleStateOverlay={setShowStateOverlay}
-          onToggleDistrictOverlay={setShowDistrictOverlay}
-        />
-      </section>
-
-      <section className="bottom-grid reveal delay-3">
-        <AlertsPanel
-          alerts={alerts}
-          isLoading={isLoading}
-          cityName={selectedCity.name}
-          thresholds={realtimeAlertThresholds}
-        />
-
-        <AuthPanel
-          user={authUser}
-          isLoading={authLoading}
-          error={authError}
-          onLogin={handleLogin}
-          onRegister={handleRegister}
-          onLogout={handleLogout}
-        />
       </section>
     </main>
   )
