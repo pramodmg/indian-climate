@@ -50,7 +50,15 @@ const priorities: PriorityItem[] = [
 ]
 
 function sourceLabel(source: ClimateSnapshot['dataSource']): string {
-  return source === 'live' ? 'Live Open-Meteo feed' : 'Offline baseline estimate'
+  if (source === 'live') {
+    return 'Live Open-Meteo feed'
+  }
+
+  if (source === 'backend-cache') {
+    return 'Backend cached feed'
+  }
+
+  return 'Offline baseline estimate'
 }
 
 function metricCards(snapshot: ClimateSnapshot): Array<{
@@ -116,8 +124,26 @@ export default function ClimateDashboard() {
   const [snapshot, setSnapshot] = useState<ClimateSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Map overlay state
+  const [overlayMetric, setOverlayMetric] = useState<OverlayMetric>('heat')
+  const [showStateOverlay, setShowStateOverlay] = useState(true)
+  const [showDistrictOverlay, setShowDistrictOverlay] = useState(true)
+
+  // Alerts state
+  const [alerts, setAlerts] = useState<RealtimeAlert[]>([])
+
+  // Auth state
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+
   const selectedCity = useMemo(
     () => indiaCities.find((city) => city.id === selectedCityId) ?? indiaCities[0],
+    [selectedCityId],
+  )
+
+  const districtOverlay = useMemo(
+    () => findDistrictOverlayByCityId(selectedCityId),
     [selectedCityId],
   )
 
@@ -131,6 +157,7 @@ export default function ClimateDashboard() {
 
       if (!isCancelled) {
         setSnapshot(result)
+        setAlerts(generateRealtimeAlerts(result, selectedCity, districtOverlay))
         setIsLoading(false)
       }
     }
@@ -140,7 +167,55 @@ export default function ClimateDashboard() {
     return () => {
       isCancelled = true
     }
-  }, [selectedCity])
+  }, [selectedCity, districtOverlay])
+
+  // Restore auth session from stored token on mount
+  useEffect(() => {
+    const token = getStoredAuthToken()
+
+    if (!token) {
+      return
+    }
+
+    fetchCurrentUser(token)
+      .then((user) => setAuthUser(user))
+      .catch(() => clearStoredAuthToken())
+  }, [])
+
+  async function handleLogin(email: string, password: string) {
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const session = await loginUser(email, password)
+      storeAuthToken(session.token)
+      setAuthUser(session.user)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleRegister(name: string, email: string, password: string) {
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const session = await registerUser(name, email, password)
+      storeAuthToken(session.token)
+      setAuthUser(session.user)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Registration failed')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  function handleLogout() {
+    clearStoredAuthToken()
+    setAuthUser(null)
+  }
 
   const updatedAt = snapshot
     ? new Intl.DateTimeFormat('en-IN', {
@@ -220,6 +295,36 @@ export default function ClimateDashboard() {
             ))}
           </ul>
         </article>
+      </section>
+
+      <section className="map-section reveal delay-3">
+        <IndiaMapView
+          selectedCity={selectedCity}
+          overlayMetric={overlayMetric}
+          showStateOverlay={showStateOverlay}
+          showDistrictOverlay={showDistrictOverlay}
+          onOverlayMetricChange={setOverlayMetric}
+          onToggleStateOverlay={setShowStateOverlay}
+          onToggleDistrictOverlay={setShowDistrictOverlay}
+        />
+      </section>
+
+      <section className="bottom-grid reveal delay-3">
+        <AlertsPanel
+          alerts={alerts}
+          isLoading={isLoading}
+          cityName={selectedCity.name}
+          thresholds={realtimeAlertThresholds}
+        />
+
+        <AuthPanel
+          user={authUser}
+          isLoading={authLoading}
+          error={authError}
+          onLogin={handleLogin}
+          onRegister={handleRegister}
+          onLogout={handleLogout}
+        />
       </section>
     </main>
   )
