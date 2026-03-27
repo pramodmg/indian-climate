@@ -6,7 +6,12 @@ import { getCityById } from './data/cities.js'
 import { requireAuth, signAuthToken } from './middleware/auth.js'
 import { generateRealtimeAlerts, getAlertThresholds } from './services/alertService.js'
 import { getClimateSnapshot } from './services/climateService.js'
-import { createUser, findUserByEmail, findUserById } from './services/userStore.js'
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  updateUserAlertPreferences,
+} from './services/userStore.js'
 
 const app = express()
 
@@ -85,6 +90,34 @@ app.get('/api/auth/me', requireAuth, async (request, response) => {
   }
 
   response.json(user)
+})
+
+app.get('/api/user/alert-preferences', requireAuth, async (request, response) => {
+  const user = await findUserById(request.userId)
+
+  if (!user) {
+    response.status(404).json({ error: 'User not found' })
+    return
+  }
+
+  response.json(user.alertPreferences)
+})
+
+app.put('/api/user/alert-preferences', requireAuth, async (request, response) => {
+  const minSeverity = request.body?.minSeverity
+  const enabledTypes = request.body?.enabledTypes
+
+  const updatedUser = await updateUserAlertPreferences(request.userId, {
+    minSeverity,
+    enabledTypes,
+  })
+
+  if (!updatedUser) {
+    response.status(404).json({ error: 'User not found' })
+    return
+  }
+
+  response.json(updatedUser.alertPreferences)
 })
 
 app.get('/api/climate/snapshot', async (request, response) => {

@@ -1,6 +1,7 @@
 # India Climate App
 
 A full-stack React + TypeScript climate intelligence dashboard for India, with live weather and air quality data, an interactive map overlay, real-time threshold alerts, and a backend API with caching and user accounts.
+
 # India Climate App Starter
 
 This project gives you a ready-to-build foundation for an India-focused climate app.
@@ -22,21 +23,30 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 ## What's included
 
 ### Frontend
-- **India city selector** — climate-zone metadata for Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Guwahati, and Jaipur
-- **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback
+
+- **City selector** — India cities (Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Guwahati, Jaipur) plus international cities (New York, London, Singapore, Tokyo, Sydney, Nairobi) grouped by region
+- **Favorite cities** — pin/unpin locations and switch to a favorites-only selector view; favorites are persisted in local storage
+- **City compare mode** — toggle a side-by-side comparison of any two cities; fetches the second city's live snapshot in parallel and renders a delta table (Δ B−A) for all key metrics; PM2.5 delta is color-coded better/worse
+- **Gamification** — XP system with 5 levels (Observer → Guardian), 8 achievement badges (First Look, City Hopper, Globe Trotter, Analyst, Pin Point, Alert Watcher, Streak Starter, All Zones), daily login streaks, and animated toast notifications on XP gain or badge unlock; progress persisted in local storage
+- **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback; backend-cached feed as intermediate source
 - **3-day forecast table**
 - **India map view** — interactive Leaflet map with state and district polygon overlays; color-coded by heatwave pressure, flood pressure, or air quality pressure; fly-to on city change
 - **Real alerts module** — automatic threshold evaluation for heatwave (watch ≥37 C / warning ≥40 C / emergency ≥44 C), flood (watch ≥60 % / warning ≥75 % / emergency ≥90 %), and air quality (watch ≥35 µg/m³ / warning ≥60 µg/m³ / emergency ≥90 µg/m³)
+- **Alert preferences panel** — authenticated users can filter alerts by minimum severity (watch / warning / emergency) and toggle individual alert categories (heatwave, flood, air quality); preferences synced with the backend
 - **Adaptation checklist panel**
 - **User account panel** — register, login, and session restore via the backend API
 
 ### Backend (`server/`)
+
 - `GET /api/health` — liveness check
 - `POST /api/auth/register` — create account (bcrypt password hash, JWT response)
 - `POST /api/auth/login` — authenticate; returns JWT
 - `GET /api/auth/me` — return current user (Bearer token)
+- `GET /api/user/alert-preferences` — fetch saved alert preferences for the authenticated user
+- `PUT /api/user/alert-preferences` — update alert preferences (minSeverity, enabledTypes)
 - `GET /api/climate/snapshot?cityId=` — cached climate snapshot (10 min TTL, Open-Meteo upstream)
 - `GET /api/alerts/realtime?cityId=` — evaluate threshold alerts for a city
+
 ## Included out of the box
 
 - India city selector with climate-zone metadata
@@ -50,33 +60,40 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 ```text
 src/
   components/
-    AlertsPanel.tsx       # realtime threshold alerts panel
-    AuthPanel.tsx         # user login / register / session panel
+    AlertPreferencesPanel.tsx # per-user alert filter preferences (severity + categories)
+    AlertsPanel.tsx           # realtime threshold alerts panel
+    AuthPanel.tsx             # user login / register / session panel
+    ComparePanel.tsx          # side-by-side city metric diff table
     CitySelector.tsx
+    GamificationPanel.tsx     # XP level, progress bar, and badge grid
+    XpToast.tsx               # toast notification component for XP + badge events
     ForecastTable.tsx
-    IndiaMapView.tsx      # Leaflet map with state + district overlays
+    IndiaMapView.tsx          # Leaflet map with state + district overlays
     MetricCard.tsx
   data/
-    indiaCities.ts
-    indiaOverlays.ts      # state and district boundary + metric data
+    indiaCities.ts            # India cities + international cities (allClimateCities export)
+    indiaOverlays.ts          # state and district boundary + metric data
   pages/
     ClimateDashboard.tsx
   services/
-    alertEngine.ts        # client-side threshold evaluation
-    backendApi.ts         # typed fetch client for the backend
-    climateApi.ts         # direct Open-Meteo fetch (fallback path)
+    alertEngine.ts            # client-side threshold evaluation
+    backendApi.ts             # typed fetch client for the backend
+    climateApi.ts             # direct Open-Meteo fetch (fallback path)
+    gamificationStore.ts      # XP store, levels, badges, localStorage persistence
+  hooks/
+    useXpToasts.ts            # toast queue hook (stable pushEvent via useCallback)
   types/
     climate.ts
 server/
-  index.js                # Express entry point
-  config.js               # port, JWT secret, cache TTL
-  middleware/auth.js      # Bearer JWT verification middleware
+  index.js                    # Express entry point
+  config.js                   # port, JWT secret, cache TTL
+  middleware/auth.js           # Bearer JWT verification middleware
   services/
     alertService.js
-    climateService.js     # caching climate fetch
-    userStore.js          # JSON file-based user store
+    climateService.js          # caching climate fetch
+    userStore.js               # JSON file-based user store (stores alertPreferences per user)
   data/
-    cities.js
+    cities.js                  # India + international city definitions
     users.json
 ```
 
@@ -114,6 +131,7 @@ server/
   App.tsx
   App.css
   index.css
+
 ```
 
 ## Suggested next milestones
