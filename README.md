@@ -22,11 +22,12 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 ## What's included
 
 ### Frontend
-- **India city selector** — climate-zone metadata for Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Guwahati, and Jaipur
-- **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback
+- **City selector** — India cities (Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Guwahati, Jaipur) plus international cities (New York, London, Singapore, Tokyo, Sydney, Nairobi) grouped by region
+- **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback; backend-cached feed as intermediate source
 - **3-day forecast table**
 - **India map view** — interactive Leaflet map with state and district polygon overlays; color-coded by heatwave pressure, flood pressure, or air quality pressure; fly-to on city change
 - **Real alerts module** — automatic threshold evaluation for heatwave (watch ≥37 C / warning ≥40 C / emergency ≥44 C), flood (watch ≥60 % / warning ≥75 % / emergency ≥90 %), and air quality (watch ≥35 µg/m³ / warning ≥60 µg/m³ / emergency ≥90 µg/m³)
+- **Alert preferences panel** — authenticated users can filter alerts by minimum severity (watch / warning / emergency) and toggle individual alert categories (heatwave, flood, air quality); preferences synced with the backend
 - **Adaptation checklist panel**
 - **User account panel** — register, login, and session restore via the backend API
 
@@ -35,6 +36,8 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 - `POST /api/auth/register` — create account (bcrypt password hash, JWT response)
 - `POST /api/auth/login` — authenticate; returns JWT
 - `GET /api/auth/me` — return current user (Bearer token)
+- `GET /api/user/alert-preferences` — fetch saved alert preferences for the authenticated user
+- `PUT /api/user/alert-preferences` — update alert preferences (minSeverity, enabledTypes)
 - `GET /api/climate/snapshot?cityId=` — cached climate snapshot (10 min TTL, Open-Meteo upstream)
 - `GET /api/alerts/realtime?cityId=` — evaluate threshold alerts for a city
 ## Included out of the box
@@ -50,33 +53,34 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 ```text
 src/
   components/
-    AlertsPanel.tsx       # realtime threshold alerts panel
-    AuthPanel.tsx         # user login / register / session panel
+    AlertPreferencesPanel.tsx # per-user alert filter preferences (severity + categories)
+    AlertsPanel.tsx           # realtime threshold alerts panel
+    AuthPanel.tsx             # user login / register / session panel
     CitySelector.tsx
     ForecastTable.tsx
-    IndiaMapView.tsx      # Leaflet map with state + district overlays
+    IndiaMapView.tsx          # Leaflet map with state + district overlays
     MetricCard.tsx
   data/
-    indiaCities.ts
-    indiaOverlays.ts      # state and district boundary + metric data
+    indiaCities.ts            # India cities + international cities (allClimateCities export)
+    indiaOverlays.ts          # state and district boundary + metric data
   pages/
     ClimateDashboard.tsx
   services/
-    alertEngine.ts        # client-side threshold evaluation
-    backendApi.ts         # typed fetch client for the backend
-    climateApi.ts         # direct Open-Meteo fetch (fallback path)
+    alertEngine.ts            # client-side threshold evaluation
+    backendApi.ts             # typed fetch client for the backend
+    climateApi.ts             # direct Open-Meteo fetch (fallback path)
   types/
     climate.ts
 server/
-  index.js                # Express entry point
-  config.js               # port, JWT secret, cache TTL
-  middleware/auth.js      # Bearer JWT verification middleware
+  index.js                    # Express entry point
+  config.js                   # port, JWT secret, cache TTL
+  middleware/auth.js           # Bearer JWT verification middleware
   services/
     alertService.js
-    climateService.js     # caching climate fetch
-    userStore.js          # JSON file-based user store
+    climateService.js          # caching climate fetch
+    userStore.js               # JSON file-based user store (stores alertPreferences per user)
   data/
-    cities.js
+    cities.js                  # India + international city definitions
     users.json
 ```
 

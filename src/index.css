@@ -1,12 +1,16 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Syne:wght@600;700&display=swap');
 
 :root {
-  font-family: 'Manrope', sans-serif;
+  font-family: 'Sora', sans-serif;
   line-height: 1.45;
   font-weight: 500;
-  color: #22373a;
-  background:
-    radial-gradient(circle at 15% 12%, #fff8eb 0%, #f8f0e1 34%, #f0eee5 100%);
+  color: #19314e;
+  background-color: #f2f8ff;
+  background-image:
+    radial-gradient(circle at 12% 10%, rgba(255, 198, 95, 0.34) 0%, rgba(255, 198, 95, 0) 36%),
+    radial-gradient(circle at 88% 20%, rgba(74, 157, 255, 0.28) 0%, rgba(74, 157, 255, 0) 42%),
+    radial-gradient(circle at 50% 95%, rgba(71, 198, 191, 0.24) 0%, rgba(71, 198, 191, 0) 38%),
+    linear-gradient(180deg, #f8fbff 0%, #eef5ff 55%, #f7fbff 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -25,19 +29,137 @@ body,
   min-height: 100%;
 }
 
+#root {
+  position: relative;
+  isolation: isolate;
+}
+
 body {
+  position: relative;
   margin: 0;
-  color: #22373a;
+  color: #19314e;
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: auto;
+  pointer-events: none;
+  z-index: -3;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.78;
+}
+
+body::before {
+  top: -10vh;
+  left: -10vw;
+  width: 40vw;
+  height: 40vw;
+  background: radial-gradient(circle, rgba(255, 176, 65, 0.46), rgba(255, 176, 65, 0));
+  animation: sky-float 16s ease-in-out infinite alternate;
+}
+
+body::after {
+  right: -12vw;
+  bottom: -14vh;
+  width: 42vw;
+  height: 42vw;
+  background: radial-gradient(circle, rgba(45, 121, 246, 0.34), rgba(45, 121, 246, 0));
+  animation: sky-float 20s ease-in-out infinite alternate-reverse;
+}
+
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -4;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(33, 99, 166, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(33, 99, 166, 0.08) 1px, transparent 1px);
+  background-size: 120px 120px;
+  mask-image: radial-gradient(circle at center, black 36%, transparent 88%);
+  animation: grid-drift 28s linear infinite;
+}
+
+#root::after {
+  content: '';
+  position: fixed;
+  inset: -18%;
+  pointer-events: none;
+  z-index: -5;
+  opacity: 0.5;
+  background:
+    conic-gradient(
+      from 180deg at 50% 50%,
+      rgba(45, 121, 246, 0.14),
+      rgba(45, 121, 246, 0) 18%,
+      rgba(255, 198, 95, 0.16) 34%,
+      rgba(255, 198, 95, 0) 52%,
+      rgba(71, 198, 191, 0.14) 70%,
+      rgba(71, 198, 191, 0) 86%,
+      rgba(45, 121, 246, 0.14)
+    );
+  filter: blur(72px);
+  animation: aurora-spin 36s linear infinite;
 }
 
 h1,
 h2,
 h3 {
   margin: 0;
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Syne', sans-serif;
   letter-spacing: -0.02em;
 }
 
 p {
   margin: 0;
+}
+
+@keyframes sky-float {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(4vw, -3vh, 0) scale(1.1);
+  }
+}
+
+@keyframes grid-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(0, -60px, 0);
+  }
+}
+
+@keyframes aurora-spin {
+  from {
+    transform: rotate(0deg) scale(1);
+  }
+
+  50% {
+    transform: rotate(180deg) scale(1.05);
+  }
+
+  to {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  #root::before,
+  #root::after {
+    animation: none;
+  }
 }

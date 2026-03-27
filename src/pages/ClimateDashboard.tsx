@@ -1,22 +1,25 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertsPanel } from '../components/AlertsPanel'
+import { AlertPreferencesPanel } from '../components/AlertPreferencesPanel'
 import { AuthPanel } from '../components/AuthPanel'
 import { IndiaMapView } from '../components/IndiaMapView'
 import { findDistrictOverlayByCityId } from '../data/indiaOverlays'
 import { generateRealtimeAlerts, realtimeAlertThresholds } from '../services/alertEngine'
 import {
   clearStoredAuthToken,
+  fetchUserAlertPreferences,
   fetchCurrentUser,
   getStoredAuthToken,
   loginUser,
   registerUser,
   storeAuthToken,
+  updateUserAlertPreferences,
 } from '../services/backendApi'
-import type { AuthUser, OverlayMetric, RealtimeAlert } from '../types/climate'
+import type { AlertPreferences, AlertSeverity, AuthUser, OverlayMetric, RealtimeAlert } from '../types/climate'
 import { CitySelector } from '../components/CitySelector'
 import { ForecastTable } from '../components/ForecastTable'
 import { MetricCard } from '../components/MetricCard'
-import { indiaCities } from '../data/indiaCities'
+import { allClimateCities } from '../data/indiaCities'
 import { fetchClimateSnapshot } from '../services/climateApi'
 import type { MetricTone } from '../components/MetricCard'
 import type { ClimateSnapshot } from '../types/climate'
@@ -48,6 +51,25 @@ const priorities: PriorityItem[] = [
       'Share practical crop-window guidance using near-term rainfall and temperature outlooks.',
   },
 ]
+
+const AUTO_REFRESH_SECONDS = 90
+
+const defaultAlertPreferences: AlertPreferences = {
+  minSeverity: 'watch',
+  enabledTypes: ['heatwave', 'flood', 'air-quality'],
+}
+
+function severityRank(severity: AlertSeverity): number {
+  if (severity === 'emergency') {
+    return 3
+  }
+
+  if (severity === 'warning') {
+    return 2
+  }
+
+  return 1
+}
 
 function sourceLabel(source: ClimateSnapshot['dataSource']): string {
   if (source === 'live') {
@@ -120,9 +142,11 @@ function metricCards(snapshot: ClimateSnapshot): Array<{
 }
 
 export default function ClimateDashboard() {
-  const [selectedCityId, setSelectedCityId] = useState(indiaCities[0].id)
+  const [selectedCityId, setSelectedCityId] = useState(allClimateCities[0].id)
   const [snapshot, setSnapshot] = useState<ClimateSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [refreshToken, setRefreshToken] = useState(0)
+  const [secondsToRefresh, setSecondsToRefresh] = useState(AUTO_REFRESH_SECONDS)
 
   // Map overlay state
   const [overlayMetric, setOverlayMetric] = useState<OverlayMetric>('heat')
@@ -131,21 +155,97 @@ export default function ClimateDashboard() {
 
   // Alerts state
   const [alerts, setAlerts] = useState<RealtimeAlert[]>([])
+  const [isCityTransitioning, setIsCityTransitioning] = useState(false)
+  const [transitionRoute, setTransitionRoute] = useState<string | null>(null)
 
   // Auth state
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [alertPreferences, setAlertPreferences] =
+    useState<AlertPreferences>(defaultAlertPreferences)
+  const [prefLoading, setPrefLoading] = useState(false)
+  const [prefSaving, setPrefSaving] = useState(false)
+  const [prefError, setPrefError] = useState<string | null>(null)
 
   const selectedCity = useMemo(
-    () => indiaCities.find((city) => city.id === selectedCityId) ?? indiaCities[0],
+    () => allClimateCities.find((city) => city.id === selectedCityId) ?? allClimateCities[0],
     [selectedCityId],
   )
+  const previousCityRef = useRef(selectedCity)
+
+  const isIndiaCity = selectedCity.regionGroup === 'india'
 
   const districtOverlay = useMemo(
     () => findDistrictOverlayByCityId(selectedCityId),
     [selectedCityId],
   )
+
+  const visibleAlerts = useMemo(() => {
+    if (!authUser) {
+      return alerts
+    }
+
+    const minimumRank = severityRank(alertPreferences.minSeverity)
+
+    return alerts.filter(
+      (alert) =>
+        alertPreferences.enabledTypes.includes(alert.type) &&
+        severityRank(alert.severity) >= minimumRank,
+    )
+  }, [alerts, alertPreferences, authUser])
+
+  const alertSummary = useMemo(
+    () => ({
+      total: visibleAlerts.length,
+      severe: visibleAlerts.filter((alert) => alert.severity !== 'watch').length,
+      emergency: visibleAlerts.filter((alert) => alert.severity === 'emergency').length,
+    }),
+    [visibleAlerts],
+  )
+
+  const hiddenAlertCount = Math.max(0, alerts.length - visibleAlerts.length)
+
+  useEffect(() => {
+    const previousCity = previousCityRef.current
+
+    if (previousCity.id === selectedCity.id) {
+      return
+    }
+
+    setTransitionRoute(`${previousCity.name} to ${selectedCity.name}`)
+    setIsCityTransitioning(true)
+    previousCityRef.current = selectedCity
+
+    const timer = window.setTimeout(() => {
+      setIsCityTransitioning(false)
+    }, 850)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [selectedCity])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSecondsToRefresh((current) => (current > 0 ? current - 1 : 0))
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (secondsToRefresh === 0) {
+      setRefreshToken((value) => value + 1)
+      setSecondsToRefresh(AUTO_REFRESH_SECONDS)
+    }
+  }, [secondsToRefresh])
+
+  useEffect(() => {
+    setSecondsToRefresh(AUTO_REFRESH_SECONDS)
+  }, [selectedCityId])
 
   useEffect(() => {
     let isCancelled = false
@@ -167,7 +267,7 @@ export default function ClimateDashboard() {
     return () => {
       isCancelled = true
     }
-  }, [selectedCity, districtOverlay])
+  }, [selectedCity, districtOverlay, refreshToken])
 
   // Restore auth session from stored token on mount
   useEffect(() => {
@@ -177,9 +277,21 @@ export default function ClimateDashboard() {
       return
     }
 
+    setPrefLoading(true)
+
     fetchCurrentUser(token)
-      .then((user) => setAuthUser(user))
+      .then((user) => {
+        setAuthUser(user)
+        setAlertPreferences(user.alertPreferences)
+        return fetchUserAlertPreferences(token)
+      })
+      .then((preferences) => {
+        setAlertPreferences(preferences)
+      })
       .catch(() => clearStoredAuthToken())
+      .finally(() => {
+        setPrefLoading(false)
+      })
   }, [])
 
   async function handleLogin(email: string, password: string) {
@@ -190,6 +302,7 @@ export default function ClimateDashboard() {
       const session = await loginUser(email, password)
       storeAuthToken(session.token)
       setAuthUser(session.user)
+      setAlertPreferences(session.user.alertPreferences)
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Login failed')
     } finally {
@@ -205,6 +318,7 @@ export default function ClimateDashboard() {
       const session = await registerUser(name, email, password)
       storeAuthToken(session.token)
       setAuthUser(session.user)
+      setAlertPreferences(session.user.alertPreferences)
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
@@ -215,6 +329,38 @@ export default function ClimateDashboard() {
   function handleLogout() {
     clearStoredAuthToken()
     setAuthUser(null)
+    setAlertPreferences(defaultAlertPreferences)
+    setPrefError(null)
+  }
+
+  async function handleSaveAlertPreferences(nextPreferences: AlertPreferences) {
+    const token = getStoredAuthToken()
+
+    if (!token || !authUser) {
+      setPrefError('Sign in again to update alert preferences.')
+      return
+    }
+
+    setPrefSaving(true)
+    setPrefError(null)
+
+    try {
+      const updated = await updateUserAlertPreferences(token, nextPreferences)
+      setAlertPreferences(updated)
+      setAuthUser({
+        ...authUser,
+        alertPreferences: updated,
+      })
+    } catch (err) {
+      setPrefError(err instanceof Error ? err.message : 'Unable to save preferences')
+    } finally {
+      setPrefSaving(false)
+    }
+  }
+
+  function handleManualRefresh() {
+    setRefreshToken((value) => value + 1)
+    setSecondsToRefresh(AUTO_REFRESH_SECONDS)
   }
 
   const updatedAt = snapshot
@@ -225,35 +371,135 @@ export default function ClimateDashboard() {
     : ''
 
   return (
-    <main className="dashboard-shell">
+    <main className={`dashboard-shell ${isCityTransitioning ? 'is-city-transitioning' : ''}`}>
       <div className="backdrop-glow backdrop-glow--one" aria-hidden="true" />
       <div className="backdrop-glow backdrop-glow--two" aria-hidden="true" />
+      <div
+        className={`city-transition-veil ${isCityTransitioning ? 'is-active' : ''}`}
+        aria-hidden="true"
+      >
+        <span>{transitionRoute ? `Reframing climate feed: ${transitionRoute}` : ''}</span>
+      </div>
 
       <section className="hero-panel reveal delay-1">
-        <p className="eyebrow">Climate intelligence for India</p>
-        <h1>India Climate Pulse</h1>
-        <p className="hero-text">
-          A starter workspace for turning climate data into city-level planning
-          insights across India.
-        </p>
+        <div className="hero-headline-row">
+          <p className="eyebrow">Climate command center</p>
+          <span
+            className={`live-pill ${snapshot?.dataSource === 'fallback' ? 'is-fallback' : ''}`}
+          >
+            <span className="live-pill__dot" aria-hidden="true" />
+            {snapshot?.dataSource === 'fallback' ? 'Fallback mode' : 'Live mode'}
+          </span>
+        </div>
+
+        <div className="hero-layout">
+          <div className="hero-copy">
+            <h1>Climate Pulse Atlas</h1>
+            <p className="hero-text">
+              A live climate command center for Indian hotspots and international city
+              monitoring in one place.
+            </p>
+
+            <div className="pulse-band" aria-live="polite">
+              <div className="pulse-band__item">
+                <strong>{alertSummary.total}</strong>
+                <span>active alerts</span>
+              </div>
+
+              <div className="pulse-band__item">
+                <strong>{alertSummary.severe}</strong>
+                <span>high priority</span>
+              </div>
+
+              <div className="pulse-band__item">
+                <strong>{secondsToRefresh}s</strong>
+                <span>next sync</span>
+              </div>
+
+              <button
+                type="button"
+                className="refresh-now-btn"
+                onClick={handleManualRefresh}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Refreshing...' : 'Refresh now'}
+              </button>
+            </div>
+          </div>
+
+          <aside className="signal-stage" aria-hidden="true">
+            <div className="signal-stage__halo signal-stage__halo--outer" />
+            <div className="signal-stage__halo signal-stage__halo--middle" />
+            <div className="signal-stage__halo signal-stage__halo--inner" />
+
+            <div className="signal-stage__core">
+              <span>{selectedCity.name}</span>
+              <strong>{snapshot ? `${snapshot.currentTempC.toFixed(1)}°` : '--'}</strong>
+              <small>{snapshot ? `${snapshot.aqiLabel} air` : 'Loading pulse'}</small>
+            </div>
+
+            <div className="signal-stage__tag signal-stage__tag--one">{selectedCity.country}</div>
+            <div className="signal-stage__tag signal-stage__tag--two">
+              {snapshot ? snapshot.riskLevel : 'Monitoring'}
+            </div>
+            <div className="signal-stage__tag signal-stage__tag--three">
+              {isIndiaCity ? 'Overlay grid' : 'Global focus'}
+            </div>
+          </aside>
+        </div>
+
+        <div className="climate-ticker" aria-hidden="true">
+          <div className="climate-ticker__track">
+            <span>Heat corridors</span>
+            <span>{selectedCity.name}</span>
+            <span>{selectedCity.country}</span>
+            <span>{selectedCity.climateZone}</span>
+            <span>
+              {snapshot ? `${snapshot.pm25.toFixed(1)} ug/m3 PM2.5` : 'Syncing air indicators'}
+            </span>
+            <span>
+              {snapshot
+                ? `${snapshot.windSpeedKmh.toFixed(1)} km/h wind stream`
+                : 'Syncing wind stream'}
+            </span>
+            <span>Heat corridors</span>
+            <span>{selectedCity.name}</span>
+            <span>{selectedCity.country}</span>
+            <span>{selectedCity.climateZone}</span>
+            <span>
+              {snapshot ? `${snapshot.pm25.toFixed(1)} ug/m3 PM2.5` : 'Syncing air indicators'}
+            </span>
+            <span>
+              {snapshot
+                ? `${snapshot.windSpeedKmh.toFixed(1)} km/h wind stream`
+                : 'Syncing wind stream'}
+            </span>
+          </div>
+        </div>
 
         <div className="controls-row">
           <CitySelector
-            cities={indiaCities}
+            cities={allClimateCities}
             selectedCityId={selectedCityId}
             onSelectCity={setSelectedCityId}
           />
 
           <div className="city-meta">
+            <span>{selectedCity.country}</span>
             <span>{selectedCity.state}</span>
             <span>{selectedCity.climateZone}</span>
-            <span>Monsoon: {selectedCity.monsoonWindow}</span>
+            <span>Seasonal window: {selectedCity.monsoonWindow}</span>
+            <span>{isIndiaCity ? 'India overlays enabled' : 'Global city mode'}</span>
           </div>
         </div>
 
         {snapshot ? (
           <p className="status-line">
-            Source: {sourceLabel(snapshot.dataSource)} | Updated: {updatedAt}
+            Source: {sourceLabel(snapshot.dataSource)} | Updated: {updatedAt} | Emergency
+            alerts: {alertSummary.emergency}
+            {authUser && hiddenAlertCount > 0
+              ? ` | Filtered by your preferences: ${hiddenAlertCount}`
+              : ''}
           </p>
         ) : null}
       </section>
@@ -303,6 +549,8 @@ export default function ClimateDashboard() {
           overlayMetric={overlayMetric}
           showStateOverlay={showStateOverlay}
           showDistrictOverlay={showDistrictOverlay}
+          isTransitioning={isCityTransitioning}
+          transitionLabel={transitionRoute}
           onOverlayMetricChange={setOverlayMetric}
           onToggleStateOverlay={setShowStateOverlay}
           onToggleDistrictOverlay={setShowDistrictOverlay}
@@ -311,20 +559,33 @@ export default function ClimateDashboard() {
 
       <section className="bottom-grid reveal delay-3">
         <AlertsPanel
-          alerts={alerts}
+          alerts={visibleAlerts}
           isLoading={isLoading}
           cityName={selectedCity.name}
           thresholds={realtimeAlertThresholds}
+          isTransitioning={isCityTransitioning}
+          transitionLabel={transitionRoute}
         />
 
-        <AuthPanel
-          user={authUser}
-          isLoading={authLoading}
-          error={authError}
-          onLogin={handleLogin}
-          onRegister={handleRegister}
-          onLogout={handleLogout}
-        />
+        <div className="account-stack">
+          <AlertPreferencesPanel
+            user={authUser}
+            preferences={alertPreferences}
+            isLoading={prefLoading}
+            isSaving={prefSaving}
+            error={prefError}
+            onSave={handleSaveAlertPreferences}
+          />
+
+          <AuthPanel
+            user={authUser}
+            isLoading={authLoading}
+            error={authError}
+            onLogin={handleLogin}
+            onRegister={handleRegister}
+            onLogout={handleLogout}
+          />
+        </div>
       </section>
     </main>
   )

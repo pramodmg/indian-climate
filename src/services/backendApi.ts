@@ -1,4 +1,10 @@
-import type { AuthSession, AuthUser, ClimateSnapshot, RealtimeAlert } from '../types/climate'
+import type {
+  AlertPreferences,
+  AuthSession,
+  AuthUser,
+  ClimateSnapshot,
+  RealtimeAlert,
+} from '../types/climate'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787'
 const AUTH_TOKEN_STORAGE_KEY = 'india-climate-auth-token'
@@ -71,6 +77,24 @@ export function loginUser(email: string, password: string): Promise<AuthSession>
 
 export function fetchCurrentUser(token: string): Promise<AuthUser> {
   return requestJson<AuthUser>('/api/auth/me', {}, token)
+}
+
+export function fetchUserAlertPreferences(token: string): Promise<AlertPreferences> {
+  return requestJson<AlertPreferences>('/api/user/alert-preferences', {}, token)
+}
+
+export function updateUserAlertPreferences(
+  token: string,
+  preferences: AlertPreferences,
+): Promise<AlertPreferences> {
+  return requestJson<AlertPreferences>(
+    '/api/user/alert-preferences',
+    {
+      method: 'PUT',
+      body: JSON.stringify(preferences),
+    },
+    token,
+  )
 }
 
 export function fetchBackendClimateSnapshot(cityId: string): Promise<ClimateSnapshot> {

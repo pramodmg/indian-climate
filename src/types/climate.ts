@@ -8,6 +8,8 @@ export interface IndiaCity {
   id: string
   name: string
   state: string
+  country: string
+  regionGroup: 'india' | 'international'
   latitude: number
   longitude: number
   climateZone: string
@@ -57,11 +59,17 @@ export interface AlertThresholdConfig {
   unit: string
 }
 
+export interface AlertPreferences {
+  minSeverity: AlertSeverity
+  enabledTypes: AlertType[]
+}
+
 export interface AuthUser {
   id: string
   name: string
   email: string
   createdAt: string
+  alertPreferences: AlertPreferences
 }
 
 export interface AuthSession {

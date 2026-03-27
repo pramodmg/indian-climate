@@ -7,6 +7,39 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const dataDirectory = path.resolve(currentDir, '../data')
 const usersFilePath = path.join(dataDirectory, 'users.json')
 
+const validAlertTypes = ['heatwave', 'flood', 'air-quality']
+const validSeverities = ['watch', 'warning', 'emergency']
+
+function buildDefaultAlertPreferences() {
+  return {
+    minSeverity: 'watch',
+    enabledTypes: [...validAlertTypes],
+  }
+}
+
+function normalizeAlertPreferences(input) {
+  const defaults = buildDefaultAlertPreferences()
+  const candidate = typeof input === 'object' && input ? input : {}
+
+  const minSeverity =
+    typeof candidate.minSeverity === 'string' && validSeverities.includes(candidate.minSeverity)
+      ? candidate.minSeverity
+      : defaults.minSeverity
+
+  const enabledTypesInput = Array.isArray(candidate.enabledTypes)
+    ? candidate.enabledTypes
+    : defaults.enabledTypes
+
+  const enabledTypes = [...new Set(enabledTypesInput)].filter(
+    (type) => typeof type === 'string' && validAlertTypes.includes(type),
+  )
+
+  return {
+    minSeverity,
+    enabledTypes,
+  }
+}
+
 async function ensureUsersFile() {
   await mkdir(dataDirectory, { recursive: true })
 
@@ -45,6 +78,7 @@ function toSafeUser(user) {
     name: user.name,
     email: user.email,
     createdAt: user.createdAt,
+    alertPreferences: normalizeAlertPreferences(user.alertPreferences),
   }
 }
 
@@ -69,10 +103,28 @@ export async function createUser({ name, email, passwordHash }) {
     email,
     passwordHash,
     createdAt: new Date().toISOString(),
+    alertPreferences: buildDefaultAlertPreferences(),
   }
 
   users.push(createdUser)
   await writeUsers(users)
 
   return toSafeUser(createdUser)
+}
+
+export async function updateUserAlertPreferences(userId, nextPreferences) {
+  const users = await readUsers()
+  const userIndex = users.findIndex((candidate) => candidate.id === userId)
+
+  if (userIndex === -1) {
+    return null
+  }
+
+  users[userIndex] = {
+    ...users[userIndex],
+    alertPreferences: normalizeAlertPreferences(nextPreferences),
+  }
+
+  await writeUsers(users)
+  return toSafeUser(users[userIndex])
 }

@@ -48,6 +48,12 @@ const cityBaselines: Record<
   chennai: { temperature: 32.1, humidity: 67, wind: 18.6, rain: 0.8, pm25: 29 },
   guwahati: { temperature: 28.2, humidity: 74, wind: 8.3, rain: 7.6, pm25: 25 },
   jaipur: { temperature: 34.5, humidity: 26, wind: 15.1, rain: 0.1, pm25: 51 },
+  'new-york': { temperature: 17.4, humidity: 61, wind: 16.8, rain: 1.7, pm25: 14 },
+  london: { temperature: 14.1, humidity: 70, wind: 18.5, rain: 1.9, pm25: 12 },
+  singapore: { temperature: 30.4, humidity: 78, wind: 11.3, rain: 3.4, pm25: 19 },
+  tokyo: { temperature: 24.2, humidity: 68, wind: 14.4, rain: 1.2, pm25: 17 },
+  sydney: { temperature: 23.6, humidity: 63, wind: 18.1, rain: 0.9, pm25: 11 },
+  nairobi: { temperature: 22.1, humidity: 58, wind: 13.4, rain: 0.8, pm25: 16 },
 }
 
 const numberFormatter = new Intl.DateTimeFormat('en-IN', {
