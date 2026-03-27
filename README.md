@@ -1,6 +1,7 @@
 # India Climate App
 
 A full-stack React + TypeScript climate intelligence dashboard for India, with live weather and air quality data, an interactive map overlay, real-time threshold alerts, and a backend API with caching and user accounts.
+
 # India Climate App Starter
 
 This project gives you a ready-to-build foundation for an India-focused climate app.
@@ -22,7 +23,11 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 ## What's included
 
 ### Frontend
+
 - **City selector** — India cities (Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Guwahati, Jaipur) plus international cities (New York, London, Singapore, Tokyo, Sydney, Nairobi) grouped by region
+- **Favorite cities** — pin/unpin locations and switch to a favorites-only selector view; favorites are persisted in local storage
+- **City compare mode** — toggle a side-by-side comparison of any two cities; fetches the second city's live snapshot in parallel and renders a delta table (Δ B−A) for all key metrics; PM2.5 delta is color-coded better/worse
+- **Gamification** — XP system with 5 levels (Observer → Guardian), 8 achievement badges (First Look, City Hopper, Globe Trotter, Analyst, Pin Point, Alert Watcher, Streak Starter, All Zones), daily login streaks, and animated toast notifications on XP gain or badge unlock; progress persisted in local storage
 - **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback; backend-cached feed as intermediate source
 - **3-day forecast table**
 - **India map view** — interactive Leaflet map with state and district polygon overlays; color-coded by heatwave pressure, flood pressure, or air quality pressure; fly-to on city change
@@ -32,6 +37,7 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 - **User account panel** — register, login, and session restore via the backend API
 
 ### Backend (`server/`)
+
 - `GET /api/health` — liveness check
 - `POST /api/auth/register` — create account (bcrypt password hash, JWT response)
 - `POST /api/auth/login` — authenticate; returns JWT
@@ -40,6 +46,7 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 - `PUT /api/user/alert-preferences` — update alert preferences (minSeverity, enabledTypes)
 - `GET /api/climate/snapshot?cityId=` — cached climate snapshot (10 min TTL, Open-Meteo upstream)
 - `GET /api/alerts/realtime?cityId=` — evaluate threshold alerts for a city
+
 ## Included out of the box
 
 - India city selector with climate-zone metadata
@@ -56,7 +63,10 @@ src/
     AlertPreferencesPanel.tsx # per-user alert filter preferences (severity + categories)
     AlertsPanel.tsx           # realtime threshold alerts panel
     AuthPanel.tsx             # user login / register / session panel
+    ComparePanel.tsx          # side-by-side city metric diff table
     CitySelector.tsx
+    GamificationPanel.tsx     # XP level, progress bar, and badge grid
+    XpToast.tsx               # toast notification component for XP + badge events
     ForecastTable.tsx
     IndiaMapView.tsx          # Leaflet map with state + district overlays
     MetricCard.tsx
@@ -69,6 +79,9 @@ src/
     alertEngine.ts            # client-side threshold evaluation
     backendApi.ts             # typed fetch client for the backend
     climateApi.ts             # direct Open-Meteo fetch (fallback path)
+    gamificationStore.ts      # XP store, levels, badges, localStorage persistence
+  hooks/
+    useXpToasts.ts            # toast queue hook (stable pushEvent via useCallback)
   types/
     climate.ts
 server/
@@ -118,6 +131,7 @@ server/
   App.tsx
   App.css
   index.css
+
 ```
 
 ## Suggested next milestones

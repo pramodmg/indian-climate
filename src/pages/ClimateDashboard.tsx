@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertsPanel } from '../components/AlertsPanel'
 import { AlertPreferencesPanel } from '../components/AlertPreferencesPanel'
 import { AuthPanel } from '../components/AuthPanel'
+import { ComparePanel } from '../components/ComparePanel'
+import { GamificationPanel } from '../components/GamificationPanel'
+import { XpToast } from '../components/XpToast'
+import { useXpToasts } from '../hooks/useXpToasts'
 import { IndiaMapView } from '../components/IndiaMapView'
 import { findDistrictOverlayByCityId } from '../data/indiaOverlays'
 import { generateRealtimeAlerts, realtimeAlertThresholds } from '../services/alertEngine'
@@ -15,6 +19,15 @@ import {
   storeAuthToken,
   updateUserAlertPreferences,
 } from '../services/backendApi'
+import {
+  readState,
+  recordAlertsViewed,
+  recordCityPinned,
+  recordCityVisit,
+  recordCompareUsed,
+  recordSession,
+} from '../services/gamificationStore'
+import type { GamificationState } from '../services/gamificationStore'
 import type { AlertPreferences, AlertSeverity, AuthUser, OverlayMetric, RealtimeAlert } from '../types/climate'
 import { CitySelector } from '../components/CitySelector'
 import { ForecastTable } from '../components/ForecastTable'
@@ -53,10 +66,35 @@ const priorities: PriorityItem[] = [
 ]
 
 const AUTO_REFRESH_SECONDS = 90
+const FAVORITE_CITIES_STORAGE_KEY = 'india-climate-favorite-cities'
 
 const defaultAlertPreferences: AlertPreferences = {
   minSeverity: 'watch',
   enabledTypes: ['heatwave', 'flood', 'air-quality'],
+}
+
+function readFavoriteCityIds(): string[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  const raw = window.localStorage.getItem(FAVORITE_CITIES_STORAGE_KEY)
+
+  if (!raw) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return [...new Set(parsed)].filter((value) => typeof value === 'string')
+  } catch {
+    return []
+  }
 }
 
 function severityRank(severity: AlertSeverity): number {
@@ -143,10 +181,25 @@ function metricCards(snapshot: ClimateSnapshot): Array<{
 
 export default function ClimateDashboard() {
   const [selectedCityId, setSelectedCityId] = useState(allClimateCities[0].id)
+  const [favoriteCityIds, setFavoriteCityIds] = useState<string[]>(() => readFavoriteCityIds())
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+
+  // Gamification
+  const [gamifState, setGamifState] = useState<GamificationState>(() => readState())
+  const { toasts, pushEvent, dismiss } = useXpToasts()
+  const compareModeUsedRef = useRef(false)
   const [snapshot, setSnapshot] = useState<ClimateSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [secondsToRefresh, setSecondsToRefresh] = useState(AUTO_REFRESH_SECONDS)
+
+  // Compare mode state
+  const [compareMode, setCompareMode] = useState(false)
+  const [compareCityId, setCompareCityId] = useState(
+    () => allClimateCities[1]?.id ?? allClimateCities[0].id,
+  )
+  const [compareSnapshot, setCompareSnapshot] = useState<ClimateSnapshot | null>(null)
+  const [compareLoading, setCompareLoading] = useState(false)
 
   // Map overlay state
   const [overlayMetric, setOverlayMetric] = useState<OverlayMetric>('heat')
@@ -172,6 +225,13 @@ export default function ClimateDashboard() {
     () => allClimateCities.find((city) => city.id === selectedCityId) ?? allClimateCities[0],
     [selectedCityId],
   )
+
+  const favoriteCities = useMemo(
+    () => allClimateCities.filter((city) => favoriteCityIds.includes(city.id)),
+    [favoriteCityIds],
+  )
+
+  const selectorCities = showFavoritesOnly ? favoriteCities : allClimateCities
   const previousCityRef = useRef(selectedCity)
 
   const isIndiaCity = selectedCity.regionGroup === 'india'
@@ -248,6 +308,70 @@ export default function ClimateDashboard() {
   }, [selectedCityId])
 
   useEffect(() => {
+    if (!compareMode) {
+      return
+    }
+
+    let isCancelled = false
+
+    async function loadCompareSnapshot() {
+      const city = allClimateCities.find((c) => c.id === compareCityId)
+
+      if (!city) {
+        return
+      }
+
+      setCompareLoading(true)
+
+      const result = await fetchClimateSnapshot(city)
+
+      if (!isCancelled) {
+        setCompareSnapshot(result)
+        setCompareLoading(false)
+      }
+    }
+
+    void loadCompareSnapshot()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [compareMode, compareCityId, refreshToken])
+
+  useEffect(() => {
+    window.localStorage.setItem(FAVORITE_CITIES_STORAGE_KEY, JSON.stringify(favoriteCityIds))
+  }, [favoriteCityIds])
+
+  // Record session on mount (handles daily streak + first-look badge)
+  useEffect(() => {
+    const event = recordSession()
+    setGamifState(readState())
+    pushEvent(event)
+    // record first city visit too
+    const firstCity = allClimateCities[0]
+    const visitEvent = recordCityVisit(firstCity.id, firstCity.regionGroup === 'international')
+    setGamifState(readState())
+    pushEvent(visitEvent)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!showFavoritesOnly) {
+      return
+    }
+
+    if (favoriteCities.length === 0) {
+      return
+    }
+
+    const isSelectedVisible = favoriteCities.some((city) => city.id === selectedCityId)
+
+    if (!isSelectedVisible) {
+      setSelectedCityId(favoriteCities[0].id)
+    }
+  }, [favoriteCities, selectedCityId, showFavoritesOnly])
+
+  useEffect(() => {
     let isCancelled = false
 
     async function loadClimateSnapshot() {
@@ -257,8 +381,14 @@ export default function ClimateDashboard() {
 
       if (!isCancelled) {
         setSnapshot(result)
-        setAlerts(generateRealtimeAlerts(result, selectedCity, districtOverlay))
+        const nextAlerts = generateRealtimeAlerts(result, selectedCity, districtOverlay)
+        setAlerts(nextAlerts)
         setIsLoading(false)
+
+        // XP for viewing alerts (capped per city load)
+        const alertEvent = recordAlertsViewed(nextAlerts.length)
+        setGamifState(readState())
+        pushEvent(alertEvent)
       }
     }
 
@@ -267,7 +397,7 @@ export default function ClimateDashboard() {
     return () => {
       isCancelled = true
     }
-  }, [selectedCity, districtOverlay, refreshToken])
+  }, [selectedCity, districtOverlay, pushEvent, refreshToken])
 
   // Restore auth session from stored token on mount
   useEffect(() => {
@@ -363,11 +493,56 @@ export default function ClimateDashboard() {
     setSecondsToRefresh(AUTO_REFRESH_SECONDS)
   }
 
+  function handleToggleFavoriteCity(cityId: string) {
+    setFavoriteCityIds((current) => {
+      const isPinning = !current.includes(cityId)
+
+      if (isPinning) {
+        const event = recordCityPinned()
+        setGamifState(readState())
+        pushEvent(event)
+        return [...current, cityId]
+      }
+
+      return current.filter((id) => id !== cityId)
+    })
+  }
+
+  const handleCitySelect = useCallback(
+    (cityId: string) => {
+      setSelectedCityId(cityId)
+      const city = allClimateCities.find((c) => c.id === cityId)
+
+      if (city) {
+        const event = recordCityVisit(cityId, city.regionGroup === 'international')
+        setGamifState(readState())
+        pushEvent(event)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  function handleToggleCompareMode() {
+    setCompareMode((current) => {
+      const turning = !current
+
+      if (turning && !compareModeUsedRef.current) {
+        compareModeUsedRef.current = true
+        const event = recordCompareUsed()
+        setGamifState(readState())
+        pushEvent(event)
+      }
+
+      return turning
+    })
+  }
+
   const updatedAt = snapshot
     ? new Intl.DateTimeFormat('en-IN', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }).format(new Date(snapshot.lastUpdated))
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(snapshot.lastUpdated))
     : ''
 
   return (
@@ -479,10 +654,44 @@ export default function ClimateDashboard() {
 
         <div className="controls-row">
           <CitySelector
-            cities={allClimateCities}
+            cities={selectorCities}
             selectedCityId={selectedCityId}
-            onSelectCity={setSelectedCityId}
+            favoriteCityIds={favoriteCityIds}
+            showFavoritesOnly={showFavoritesOnly}
+            onSelectCity={handleCitySelect}
+            onToggleFavorite={handleToggleFavoriteCity}
+            onShowFavoritesOnlyChange={setShowFavoritesOnly}
           />
+
+          <div className="compare-controls">
+            <button
+              type="button"
+              className={`compare-toggle-btn ${compareMode ? 'is-active' : ''}`}
+              onClick={handleToggleCompareMode}
+            >
+              {compareMode ? 'Exit compare' : 'Compare cities'}
+            </button>
+
+            {compareMode ? (
+              <label className="compare-city-select-label">
+                <span>Compare with</span>
+                <select
+                  className="compare-city-select"
+                  value={compareCityId}
+                  onChange={(event) => {
+                    setCompareCityId(event.target.value)
+                    setCompareSnapshot(null)
+                  }}
+                >
+                  {allClimateCities.map((city) => (
+                    <option key={city.id} value={city.id}>
+                      {city.name}, {city.country}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
 
           <div className="city-meta">
             <span>{selectedCity.country}</span>
@@ -509,14 +718,14 @@ export default function ClimateDashboard() {
 
         {!isLoading && snapshot
           ? metricCards(snapshot).map((card) => (
-              <MetricCard
-                key={card.label}
-                label={card.label}
-                value={card.value}
-                unit={card.unit}
-                tone={card.tone}
-              />
-            ))
+            <MetricCard
+              key={card.label}
+              label={card.label}
+              value={card.value}
+              unit={card.unit}
+              tone={card.tone}
+            />
+          ))
           : null}
       </section>
 
@@ -543,6 +752,21 @@ export default function ClimateDashboard() {
         </article>
       </section>
 
+      {compareMode ? (
+        <section className="compare-section reveal delay-2">
+          <ComparePanel
+            primaryCity={selectedCity}
+            primarySnapshot={snapshot}
+            compareCity={
+              allClimateCities.find((city) => city.id === compareCityId) ?? allClimateCities[1]
+            }
+            compareSnapshot={compareSnapshot}
+            isPrimaryLoading={isLoading}
+            isCompareLoading={compareLoading}
+          />
+        </section>
+      ) : null}
+
       <section className="map-section reveal delay-3">
         <IndiaMapView
           selectedCity={selectedCity}
@@ -568,6 +792,8 @@ export default function ClimateDashboard() {
         />
 
         <div className="account-stack">
+          <GamificationPanel state={gamifState} />
+
           <AlertPreferencesPanel
             user={authUser}
             preferences={alertPreferences}
@@ -587,6 +813,7 @@ export default function ClimateDashboard() {
           />
         </div>
       </section>
+      <XpToast toasts={toasts} onDismiss={dismiss} />
     </main>
   )
 }
