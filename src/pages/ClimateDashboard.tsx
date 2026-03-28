@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertHistoryPanel } from '../components/AlertHistoryPanel'
 import { AlertsPanel } from '../components/AlertsPanel'
 import { AlertPreferencesPanel } from '../components/AlertPreferencesPanel'
+import { AQIPanel } from '../components/AQIPanel'
 import { AuthPanel } from '../components/AuthPanel'
+import { CityContextPanel } from '../components/CityContextPanel'
 import { ComparePanel } from '../components/ComparePanel'
 import { GamificationPanel } from '../components/GamificationPanel'
+import { RiskLeaderboard } from '../components/RiskLeaderboard'
+import type { LeaderboardEntry } from '../components/RiskLeaderboard'
+import { buildLeaderboard } from '../services/leaderboardService'
+import { Sparkline } from '../components/Sparkline'
 import { XpToast } from '../components/XpToast'
 import { useXpToasts } from '../hooks/useXpToasts'
 import { IndiaMapView } from '../components/IndiaMapView'
@@ -13,6 +20,7 @@ import {
   clearStoredAuthToken,
   fetchUserAlertPreferences,
   fetchCurrentUser,
+  fetchCityContextDetails,
   getStoredAuthToken,
   loginUser,
   registerUser,
@@ -28,12 +36,29 @@ import {
   recordSession,
 } from '../services/gamificationStore'
 import type { GamificationState } from '../services/gamificationStore'
-import type { AlertPreferences, AlertSeverity, AuthUser, OverlayMetric, RealtimeAlert } from '../types/climate'
+import {
+  recordHistoricalAlerts,
+  readAlertHistory,
+} from '../services/alertHistoryStore'
+import type { HistoricalAlert } from '../services/alertHistoryStore'
+import {
+  recordSparkReadings,
+  getSparkHistory,
+} from '../services/sparklineStore'
+import type {
+  AlertPreferences,
+  AlertSeverity,
+  AuthUser,
+  CityContextDetails,
+  OverlayMetric,
+  RealtimeAlert,
+} from '../types/climate'
 import { CitySelector } from '../components/CitySelector'
 import { ForecastTable } from '../components/ForecastTable'
 import { MetricCard } from '../components/MetricCard'
 import { allClimateCities } from '../data/indiaCities'
 import { fetchClimateSnapshot } from '../services/climateApi'
+import { exportCityContextCsv, exportCityContextJson } from '../utils/cityContextExport'
 import type { MetricTone } from '../components/MetricCard'
 import type { ClimateSnapshot } from '../types/climate'
 
@@ -160,13 +185,13 @@ function metricCards(snapshot: ClimateSnapshot): Array<{
     },
     {
       label: 'PM2.5 level',
-      value: snapshot.pm25.toFixed(1),
+      value: snapshot.aqi.pollutants.pm25?.toFixed(1) ?? '--',
       unit: 'ug/m3',
       tone: 'air',
     },
     {
       label: 'Air quality',
-      value: snapshot.aqiLabel,
+      value: snapshot.aqi.category,
       unit: '',
       tone: 'air',
     },
@@ -188,6 +213,15 @@ export default function ClimateDashboard() {
   const [gamifState, setGamifState] = useState<GamificationState>(() => readState())
   const { toasts, pushEvent, dismiss } = useXpToasts()
   const compareModeUsedRef = useRef(false)
+
+  // Leaderboard state — map of cityId → snapshot for all loaded cities
+  const [leaderboardSnapshots, setLeaderboardSnapshots] = useState<Map<string, ClimateSnapshot>>(
+    () => new Map(),
+  )
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([])
+
+  // Alert history
+  const [alertHistory, setAlertHistory] = useState<HistoricalAlert[]>(() => readAlertHistory())
   const [snapshot, setSnapshot] = useState<ClimateSnapshot | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -221,6 +255,13 @@ export default function ClimateDashboard() {
   const [prefSaving, setPrefSaving] = useState(false)
   const [prefError, setPrefError] = useState<string | null>(null)
 
+  // City context intelligence state
+  const [cityContext, setCityContext] = useState<CityContextDetails | null>(null)
+  const [cityContextLoading, setCityContextLoading] = useState(false)
+  const [cityContextError, setCityContextError] = useState<string | null>(null)
+  const [contextScope, setContextScope] = useState<'city' | 'district'>('city')
+  const [contextRadiusMeters, setContextRadiusMeters] = useState(1800)
+
   const selectedCity = useMemo(
     () => allClimateCities.find((city) => city.id === selectedCityId) ?? allClimateCities[0],
     [selectedCityId],
@@ -240,6 +281,18 @@ export default function ClimateDashboard() {
     () => findDistrictOverlayByCityId(selectedCityId),
     [selectedCityId],
   )
+
+  const districtCenter = useMemo(() => {
+    if (!districtOverlay || districtOverlay.coordinates.length === 0) {
+      return null
+    }
+
+    const points = districtOverlay.coordinates
+    const lat = points.reduce((sum, [pointLat]) => sum + pointLat, 0) / points.length
+    const lon = points.reduce((sum, [, pointLon]) => sum + pointLon, 0) / points.length
+
+    return { latitude: lat, longitude: lon }
+  }, [districtOverlay])
 
   const visibleAlerts = useMemo(() => {
     if (!authUser) {
@@ -385,6 +438,30 @@ export default function ClimateDashboard() {
         setAlerts(nextAlerts)
         setIsLoading(false)
 
+        // Record sparkline readings for this city
+        recordSparkReadings(selectedCity.id, {
+          temp: result.currentTempC,
+          pm25: result.aqi.pollutants.pm25 ?? 0,
+          humidity: result.humidity,
+          wind: result.windSpeedKmh,
+          rain: result.precipitationMm,
+        })
+
+        // Update leaderboard
+        setLeaderboardSnapshots((prev) => {
+          const next = new Map(prev)
+          next.set(selectedCity.id, result)
+          return next
+        })
+
+        // Persist alert history
+        recordHistoricalAlerts(
+          selectedCity.id,
+          selectedCity.name,
+          nextAlerts,
+        )
+        setAlertHistory(readAlertHistory())
+
         // XP for viewing alerts (capped per city load)
         const alertEvent = recordAlertsViewed(nextAlerts.length)
         setGamifState(readState())
@@ -398,6 +475,74 @@ export default function ClimateDashboard() {
       isCancelled = true
     }
   }, [selectedCity, districtOverlay, pushEvent, refreshToken])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadCityContext() {
+      setCityContextLoading(true)
+      setCityContextError(null)
+
+      try {
+        const details = await fetchCityContextDetails(selectedCity.id, {
+          radiusMeters: contextRadiusMeters,
+          scope: contextScope,
+          latitude: contextScope === 'district' ? districtCenter?.latitude : undefined,
+          longitude: contextScope === 'district' ? districtCenter?.longitude : undefined,
+          scopeLabel:
+            contextScope === 'district'
+              ? districtOverlay?.name ?? undefined
+              : `${selectedCity.name} City Core`,
+        })
+
+        if (!isCancelled) {
+          setCityContext(details)
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setCityContextError(err instanceof Error ? err.message : 'Unable to load city context')
+          setCityContext(null)
+        }
+      } finally {
+        if (!isCancelled) {
+          setCityContextLoading(false)
+        }
+      }
+    }
+
+    void loadCityContext()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [contextRadiusMeters, contextScope, districtCenter, districtOverlay, selectedCity.id, selectedCity.name])
+
+  useEffect(() => {
+    if (contextScope === 'district' && !districtOverlay) {
+      setContextScope('city')
+    }
+  }, [contextScope, districtOverlay])
+
+  function handleExportContextJson() {
+    if (!cityContext) {
+      return
+    }
+
+    exportCityContextJson(cityContext)
+  }
+
+  function handleExportContextCsv() {
+    if (!cityContext) {
+      return
+    }
+
+    exportCityContextCsv(cityContext)
+  }
+
+  // Build leaderboard whenever snapshot map changes
+  useEffect(() => {
+    setLeaderboardEntries(buildLeaderboard(leaderboardSnapshots, allClimateCities))
+  }, [leaderboardSnapshots])
 
   // Restore auth session from stored token on mount
   useEffect(() => {
@@ -610,7 +755,7 @@ export default function ClimateDashboard() {
             <div className="signal-stage__core">
               <span>{selectedCity.name}</span>
               <strong>{snapshot ? `${snapshot.currentTempC.toFixed(1)}°` : '--'}</strong>
-              <small>{snapshot ? `${snapshot.aqiLabel} air` : 'Loading pulse'}</small>
+              <small>{snapshot ? `${snapshot.aqi.category} air` : 'Loading pulse'}</small>
             </div>
 
             <div className="signal-stage__tag signal-stage__tag--one">{selectedCity.country}</div>
@@ -630,7 +775,7 @@ export default function ClimateDashboard() {
             <span>{selectedCity.country}</span>
             <span>{selectedCity.climateZone}</span>
             <span>
-              {snapshot ? `${snapshot.pm25.toFixed(1)} ug/m3 PM2.5` : 'Syncing air indicators'}
+              {snapshot ? `${snapshot.aqi.pollutants.pm25?.toFixed(1) ?? '--'} ug/m3 PM2.5` : 'Syncing air indicators'}
             </span>
             <span>
               {snapshot
@@ -642,7 +787,7 @@ export default function ClimateDashboard() {
             <span>{selectedCity.country}</span>
             <span>{selectedCity.climateZone}</span>
             <span>
-              {snapshot ? `${snapshot.pm25.toFixed(1)} ug/m3 PM2.5` : 'Syncing air indicators'}
+              {snapshot ? `${snapshot.aqi.pollutants.pm25?.toFixed(1) ?? '--'} ug/m3 PM2.5` : 'Syncing air indicators'}
             </span>
             <span>
               {snapshot
@@ -717,15 +862,34 @@ export default function ClimateDashboard() {
         {isLoading && <p className="panel-note">Loading climate indicators...</p>}
 
         {!isLoading && snapshot
-          ? metricCards(snapshot).map((card) => (
-            <MetricCard
-              key={card.label}
-              label={card.label}
-              value={card.value}
-              unit={card.unit}
-              tone={card.tone}
-            />
-          ))
+          ? metricCards(snapshot).map((card) => {
+            const metricToSpark: Record<string, 'temp' | 'pm25' | 'humidity' | 'wind' | 'rain' | null> = {
+              'Temperature': 'temp',
+              'PM2.5 level': 'pm25',
+              'Humidity': 'humidity',
+              'Wind speed': 'wind',
+              'Rainfall': 'rain',
+            }
+            const sparkMetric = metricToSpark[card.label] ?? null
+            const sparkReadings = sparkMetric
+              ? getSparkHistory(selectedCityId, sparkMetric)
+              : []
+
+            return (
+              <MetricCard
+                key={card.label}
+                label={card.label}
+                value={card.value}
+                unit={card.unit}
+                tone={card.tone}
+                sparkline={
+                  sparkMetric && sparkReadings.length >= 2
+                    ? <Sparkline readings={sparkReadings} metric={sparkMetric} />
+                    : undefined
+                }
+              />
+            )
+          })
           : null}
       </section>
 
@@ -778,6 +942,39 @@ export default function ClimateDashboard() {
           onOverlayMetricChange={setOverlayMetric}
           onToggleStateOverlay={setShowStateOverlay}
           onToggleDistrictOverlay={setShowDistrictOverlay}
+        />
+      </section>
+
+      <section className="leaderboard-history-grid reveal delay-3">
+        <RiskLeaderboard
+          entries={leaderboardEntries}
+          selectedCityId={selectedCityId}
+          onSelectCity={handleCitySelect}
+        />
+
+        <AlertHistoryPanel
+          history={alertHistory}
+          onHistoryCleared={() => setAlertHistory([])}
+        />
+      </section>
+
+      <section className="context-section reveal delay-3">
+        <CityContextPanel
+          context={cityContext}
+          isLoading={cityContextLoading}
+          error={cityContextError}
+          scope={contextScope}
+          radiusMeters={contextRadiusMeters}
+          districtAvailable={Boolean(districtOverlay)}
+          onScopeChange={setContextScope}
+          onRadiusChange={setContextRadiusMeters}
+          onExportJson={handleExportContextJson}
+          onExportCsv={handleExportContextCsv}
+        />
+
+        <AQIPanel
+          aqi={snapshot?.aqi ?? null}
+          isLoading={isLoading}
         />
       </section>
 

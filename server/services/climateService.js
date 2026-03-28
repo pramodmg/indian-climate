@@ -1,8 +1,8 @@
 import { CACHE_TTL_SECONDS } from '../config.js'
 import { getCityById } from '../data/cities.js'
+import { fetchAQIData, buildFallbackAQIData } from './aqiService.js'
 
 const WEATHER_ENDPOINT = 'https://api.open-meteo.com/v1/forecast'
-const AIR_ENDPOINT = 'https://air-quality-api.open-meteo.com/v1/air-quality'
 const formatter = new Intl.DateTimeFormat('en-IN', {
   weekday: 'short',
   day: '2-digit',
@@ -25,22 +25,6 @@ function toDisplayDate(isoDate) {
   return formatter.format(parsedDate)
 }
 
-function classifyPm25(pm25) {
-  if (pm25 <= 15) {
-    return { aqiLabel: 'Good', riskLevel: 'Low' }
-  }
-
-  if (pm25 <= 30) {
-    return { aqiLabel: 'Fair', riskLevel: 'Moderate' }
-  }
-
-  if (pm25 <= 55) {
-    return { aqiLabel: 'Poor', riskLevel: 'High' }
-  }
-
-  return { aqiLabel: 'Very poor', riskLevel: 'Severe' }
-}
-
 function buildFallbackForecast(baseTemperature) {
   return Array.from({ length: 3 }, (_, index) => {
     const date = new Date()
@@ -56,7 +40,7 @@ function buildFallbackForecast(baseTemperature) {
 }
 
 function buildFallbackSnapshot(city) {
-  const quality = classifyPm25(city.baseline.pm25)
+  const aqi = buildFallbackAQIData(city.baseline.pm25)
 
   return {
     currentTempC: city.baseline.temperature,
@@ -64,9 +48,8 @@ function buildFallbackSnapshot(city) {
     humidity: city.baseline.humidity,
     windSpeedKmh: city.baseline.wind,
     precipitationMm: city.baseline.rain,
-    pm25: city.baseline.pm25,
-    aqiLabel: quality.aqiLabel,
-    riskLevel: quality.riskLevel,
+    aqi,
+    riskLevel: aqi.healthRisk === 'severe' ? 'Severe' : aqi.healthRisk === 'everyone' ? 'High' : aqi.healthRisk === 'general' ? 'Moderate' : 'Low',
     dataSource: 'fallback',
     cacheStatus: 'miss',
     lastUpdated: new Date().toISOString(),
@@ -95,27 +78,16 @@ async function fetchLiveSnapshot(city) {
   weatherUrl.searchParams.set('timezone', 'auto')
   weatherUrl.searchParams.set('forecast_days', '4')
 
-  const airUrl = new URL(AIR_ENDPOINT)
-  airUrl.searchParams.set('latitude', String(city.latitude))
-  airUrl.searchParams.set('longitude', String(city.longitude))
-  airUrl.searchParams.set('hourly', 'pm2_5')
-  airUrl.searchParams.set('forecast_days', '1')
-  airUrl.searchParams.set('timezone', 'auto')
-
-  const [weatherResponse, airResponse] = await Promise.all([
+  const [weatherResponse, aqiData] = await Promise.all([
     fetch(weatherUrl),
-    fetch(airUrl),
+    fetchAQIData(city.latitude, city.longitude).catch(() => buildFallbackAQIData(city.baseline.pm25)),
   ])
 
-  if (!weatherResponse.ok || !airResponse.ok) {
-    throw new Error('Unable to reach climate endpoints')
+  if (!weatherResponse.ok) {
+    throw new Error('Unable to reach weather endpoint')
   }
 
   const weatherData = await weatherResponse.json()
-  const airData = await airResponse.json()
-
-  const pm25 = firstNumericValue(airData.hourly?.pm2_5) ?? city.baseline.pm25
-  const quality = classifyPm25(pm25)
 
   const dailyDates = weatherData.daily?.time?.slice(1, 4) ?? []
   const dailyMaxTemps = weatherData.daily?.temperature_2m_max?.slice(1, 4) ?? []
@@ -134,6 +106,14 @@ async function fetchLiveSnapshot(city) {
     nextThreeDays.push(...fallbackDays.slice(nextThreeDays.length))
   }
 
+  const riskLevelMap = {
+    'none': 'Low',
+    'sensitive': 'Moderate',
+    'general': 'High',
+    'everyone': 'High',
+    'severe': 'Severe'
+  }
+
   return {
     currentTempC: roundToOneDecimal(
       weatherData.current?.temperature_2m ?? city.baseline.temperature,
@@ -146,9 +126,8 @@ async function fetchLiveSnapshot(city) {
     ),
     windSpeedKmh: roundToOneDecimal(weatherData.current?.wind_speed_10m ?? city.baseline.wind),
     precipitationMm: roundToOneDecimal(weatherData.current?.precipitation ?? city.baseline.rain),
-    pm25: roundToOneDecimal(pm25),
-    aqiLabel: quality.aqiLabel,
-    riskLevel: quality.riskLevel,
+    aqi: aqiData,
+    riskLevel: riskLevelMap[aqiData.healthRisk] || 'Moderate',
     dataSource: 'live',
     cacheStatus: 'miss',
     lastUpdated: weatherData.current?.time ?? new Date().toISOString(),

@@ -6,6 +6,7 @@ import { getCityById } from './data/cities.js'
 import { requireAuth, signAuthToken } from './middleware/auth.js'
 import { generateRealtimeAlerts, getAlertThresholds } from './services/alertService.js'
 import { getClimateSnapshot } from './services/climateService.js'
+import { getCityContextDetails } from './services/cityContextService.js'
 import {
   createUser,
   findUserByEmail,
@@ -167,6 +168,38 @@ app.get('/api/alerts/realtime', async (request, response) => {
     })
   } catch {
     response.status(502).json({ error: 'Unable to evaluate realtime alerts' })
+  }
+})
+
+app.get('/api/city/context', async (request, response) => {
+  const cityId = String(request.query.cityId ?? '').trim()
+  const scope = String(request.query.scope ?? 'city').trim().toLowerCase()
+  const radiusMeters = Number(request.query.radiusMeters)
+  const latitude = Number(request.query.latitude)
+  const longitude = Number(request.query.longitude)
+  const scopeLabel = String(request.query.scopeLabel ?? '').trim()
+
+  if (!cityId) {
+    response.status(400).json({ error: 'cityId query parameter is required' })
+    return
+  }
+
+  if (!getCityById(cityId)) {
+    response.status(404).json({ error: 'Unknown cityId' })
+    return
+  }
+
+  try {
+    const context = await getCityContextDetails(cityId, {
+      scope: scope === 'district' ? 'district' : 'city',
+      radiusMeters: Number.isFinite(radiusMeters) ? radiusMeters : undefined,
+      latitude: Number.isFinite(latitude) ? latitude : undefined,
+      longitude: Number.isFinite(longitude) ? longitude : undefined,
+      scopeLabel: scopeLabel || undefined,
+    })
+    response.json(context)
+  } catch {
+    response.status(502).json({ error: 'Unable to load city context details' })
   }
 })
 

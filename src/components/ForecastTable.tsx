@@ -17,8 +17,8 @@ export function ForecastTable({ days }: ForecastTableProps) {
           </tr>
         </thead>
         <tbody>
-          {days.map((day) => (
-            <tr key={day.date}>
+          {days.map((day, index) => (
+            <tr key={`${day.date}-${index}`}>
               <td>{day.date}</td>
               <td>{day.minC.toFixed(1)} C</td>
               <td>{day.maxC.toFixed(1)} C</td>

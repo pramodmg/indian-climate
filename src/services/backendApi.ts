@@ -1,12 +1,13 @@
 import type {
   AlertPreferences,
   AuthSession,
+  CityContextDetails,
   AuthUser,
   ClimateSnapshot,
   RealtimeAlert,
 } from '../types/climate'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const AUTH_TOKEN_STORAGE_KEY = 'india-climate-auth-token'
 
 interface BackendError {
@@ -111,4 +112,41 @@ export async function fetchBackendRealtimeAlerts(
   )
 
   return payload.alerts
+}
+
+interface FetchCityContextOptions {
+  radiusMeters?: number
+  scope?: 'city' | 'district'
+  latitude?: number
+  longitude?: number
+  scopeLabel?: string
+}
+
+export function fetchCityContextDetails(
+  cityId: string,
+  options: FetchCityContextOptions = {},
+): Promise<CityContextDetails> {
+  const params = new URLSearchParams({ cityId })
+
+  if (options.radiusMeters) {
+    params.set('radiusMeters', String(options.radiusMeters))
+  }
+
+  if (options.scope) {
+    params.set('scope', options.scope)
+  }
+
+  if (typeof options.latitude === 'number') {
+    params.set('latitude', String(options.latitude))
+  }
+
+  if (typeof options.longitude === 'number') {
+    params.set('longitude', String(options.longitude))
+  }
+
+  if (options.scopeLabel) {
+    params.set('scopeLabel', options.scopeLabel)
+  }
+
+  return requestJson<CityContextDetails>(`/api/city/context?${params.toString()}`)
 }

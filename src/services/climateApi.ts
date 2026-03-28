@@ -1,5 +1,7 @@
 import type {
-  ClimateRisk,
+  AQICategory,
+  AQIData,
+  AQIHealthRisk,
   ClimateSnapshot,
   ForecastDay,
   IndiaCity,
@@ -25,11 +27,86 @@ interface WeatherApiResponse {
 interface AirQualityApiResponse {
   hourly?: {
     pm2_5?: Array<number | null>
+    pm10?: Array<number | null>
+    nitrogen_dioxide?: Array<number | null>
+    ozone?: Array<number | null>
   }
 }
 
 const WEATHER_ENDPOINT = 'https://api.open-meteo.com/v1/forecast'
 const AIR_ENDPOINT = 'https://air-quality-api.open-meteo.com/v1/air-quality'
+
+function buildAQIData(pm25: number, pm10: number | null, no2: number | null, o3: number | null): AQIData {
+  const score = Math.max(
+    calculatePollutantScore(pm25, [50, 100, 150, 250]),
+    calculatePollutantScore(pm10 ?? 0, [50, 100, 250, 350]),
+    calculatePollutantScore(no2 ?? 0, [40, 80, 180, 280]),
+    calculatePollutantScore(o3 ?? 0, [50, 100, 168, 208]),
+  )
+
+  let category: AQICategory
+  let healthRisk: AQIHealthRisk
+  let recommendation: string
+  let affectedGroups: string[]
+
+  if (score <= 50) {
+    category = 'Good'
+    healthRisk = 'none'
+    recommendation = 'Excellent air quality. Ideal for outdoor activities.'
+    affectedGroups = []
+  } else if (score <= 100) {
+    category = 'Satisfactory'
+    healthRisk = 'sensitive'
+    recommendation = 'Satisfactory air quality. Sensitive groups should limit outdoor activity.'
+    affectedGroups = ['children', 'elderly', 'people with respiratory diseases']
+  } else if (score <= 200) {
+    category = 'Moderately Polluted'
+    healthRisk = 'sensitive'
+    recommendation = 'Moderately polluted. Sensitive groups should avoid prolonged outdoor exposure.'
+    affectedGroups = ['children', 'elderly', 'people with respiratory diseases', 'people with heart disease']
+  } else if (score <= 300) {
+    category = 'Poor'
+    healthRisk = 'general'
+    recommendation = 'Poor air quality. General public should limit outdoor activity.'
+    affectedGroups = ['children', 'elderly', 'people with respiratory diseases', 'people with heart disease']
+  } else if (score <= 400) {
+    category = 'Very Poor'
+    healthRisk = 'everyone'
+    recommendation = 'Very poor air quality. Avoid outdoor activity. Use air purifiers indoors.'
+    affectedGroups = ['everyone']
+  } else {
+    category = 'Severe'
+    healthRisk = 'severe'
+    recommendation = 'Severe air quality hazard. Stay indoors and use air purifiers.'
+    affectedGroups = ['everyone']
+  }
+
+  return {
+    category,
+    aqi: Math.round(score),
+    healthRisk,
+    pollutants: {
+      pm25: Math.round(pm25 * 10) / 10,
+      pm10: pm10 != null ? Math.round(pm10 * 10) / 10 : null,
+      no2: no2 != null ? Math.round(no2 * 10) / 10 : null,
+      o3: o3 != null ? Math.round(o3 * 10) / 10 : null,
+      co: null,
+      so2: null,
+    },
+    recommendation,
+    affectedGroups,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function calculatePollutantScore(value: number, thresholds: [number, number, number, number]): number {
+  if (!value) return 0
+  if (value <= thresholds[0]) return (value / thresholds[0]) * 50
+  if (value <= thresholds[1]) return 50 + ((value - thresholds[0]) / (thresholds[1] - thresholds[0])) * 50
+  if (value <= thresholds[2]) return 100 + ((value - thresholds[1]) / (thresholds[2] - thresholds[1])) * 100
+  if (value <= thresholds[3]) return 200 + ((value - thresholds[2]) / (thresholds[3] - thresholds[2])) * 100
+  return Math.min(300 + (value - thresholds[3]) * 5, 400)
+}
 
 const cityBaselines: Record<
   string,
@@ -86,21 +163,6 @@ function getBaseline(cityId: string) {
   }
 }
 
-function classifyPm25(pm25: number): { aqiLabel: string; riskLevel: ClimateRisk } {
-  if (pm25 <= 15) {
-    return { aqiLabel: 'Good', riskLevel: 'Low' }
-  }
-
-  if (pm25 <= 30) {
-    return { aqiLabel: 'Fair', riskLevel: 'Moderate' }
-  }
-
-  if (pm25 <= 55) {
-    return { aqiLabel: 'Poor', riskLevel: 'High' }
-  }
-
-  return { aqiLabel: 'Very poor', riskLevel: 'Severe' }
-}
 
 function buildFallbackForecast(baseTemperature: number): ForecastDay[] {
   return Array.from({ length: 3 }, (_, index) => {
@@ -118,7 +180,10 @@ function buildFallbackForecast(baseTemperature: number): ForecastDay[] {
 
 function buildFallbackSnapshot(city: IndiaCity): ClimateSnapshot {
   const baseline = getBaseline(city.id)
-  const quality = classifyPm25(baseline.pm25)
+  const aqi = buildAQIData(baseline.pm25, null, null, null)
+  const riskLevelMap: Record<string, ClimateSnapshot['riskLevel']> = {
+    none: 'Low', sensitive: 'Moderate', general: 'High', everyone: 'High', severe: 'Severe'
+  }
 
   return {
     currentTempC: baseline.temperature,
@@ -126,9 +191,8 @@ function buildFallbackSnapshot(city: IndiaCity): ClimateSnapshot {
     humidity: baseline.humidity,
     windSpeedKmh: baseline.wind,
     precipitationMm: baseline.rain,
-    pm25: baseline.pm25,
-    aqiLabel: quality.aqiLabel,
-    riskLevel: quality.riskLevel,
+    aqi,
+    riskLevel: riskLevelMap[aqi.healthRisk] ?? 'Moderate',
     dataSource: 'fallback',
     lastUpdated: new Date().toISOString(),
     nextThreeDays: buildFallbackForecast(baseline.temperature),
@@ -163,7 +227,7 @@ export async function fetchClimateSnapshot(city: IndiaCity): Promise<ClimateSnap
   const airUrl = new URL(AIR_ENDPOINT)
   airUrl.searchParams.set('latitude', String(city.latitude))
   airUrl.searchParams.set('longitude', String(city.longitude))
-  airUrl.searchParams.set('hourly', 'pm2_5')
+  airUrl.searchParams.set('hourly', 'pm2_5,pm10,nitrogen_dioxide,ozone')
   airUrl.searchParams.set('forecast_days', '1')
   airUrl.searchParams.set('timezone', 'auto')
 
@@ -181,7 +245,13 @@ export async function fetchClimateSnapshot(city: IndiaCity): Promise<ClimateSnap
     const airData = (await airResponse.json()) as AirQualityApiResponse
 
     const pm25 = firstNumericValue(airData.hourly?.pm2_5) ?? baseline.pm25
-    const quality = classifyPm25(pm25)
+    const pm10 = firstNumericValue(airData.hourly?.pm10)
+    const no2 = firstNumericValue(airData.hourly?.nitrogen_dioxide)
+    const o3 = firstNumericValue(airData.hourly?.ozone)
+    const aqi = buildAQIData(pm25, pm10, no2, o3)
+    const riskLevelMap: Record<string, ClimateSnapshot['riskLevel']> = {
+      none: 'Low', sensitive: 'Moderate', general: 'High', everyone: 'High', severe: 'Severe'
+    }
 
     const dailyDates = weatherData.daily?.time?.slice(1, 4) ?? []
     const dailyMaxTemps = weatherData.daily?.temperature_2m_max?.slice(1, 4) ?? []
@@ -215,9 +285,8 @@ export async function fetchClimateSnapshot(city: IndiaCity): Promise<ClimateSnap
       precipitationMm: roundToOneDecimal(
         weatherData.current?.precipitation ?? baseline.rain,
       ),
-      pm25: roundToOneDecimal(pm25),
-      aqiLabel: quality.aqiLabel,
-      riskLevel: quality.riskLevel,
+      aqi,
+      riskLevel: riskLevelMap[aqi.healthRisk] ?? 'Moderate',
       dataSource: 'live',
       lastUpdated: weatherData.current?.time ?? new Date().toISOString(),
       nextThreeDays,

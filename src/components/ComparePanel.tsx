@@ -66,16 +66,18 @@ function buildRows(
         },
         {
             label: 'PM2.5',
-            primaryValue: primary.pm25.toFixed(1),
-            compareValue: compare.pm25.toFixed(1),
+            primaryValue: primary.aqi.pollutants.pm25?.toFixed(1) ?? '--',
+            compareValue: compare.aqi.pollutants.pm25?.toFixed(1) ?? '--',
             unit: 'µg/m³',
-            delta: compare.pm25 - primary.pm25,
+            delta: (primary.aqi.pollutants.pm25 && compare.aqi.pollutants.pm25) 
+                ? compare.aqi.pollutants.pm25 - primary.aqi.pollutants.pm25 
+                : null,
             lowerIsBetter: true,
         },
         {
             label: 'Air quality',
-            primaryValue: primary.aqiLabel,
-            compareValue: compare.aqiLabel,
+            primaryValue: primary.aqi.category,
+            compareValue: compare.aqi.category,
             unit: '',
             delta: null,
             lowerIsBetter: null,

@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently --names \"client,server\" --prefix-colors \"cyan,yellow\" \"vite\" \"node --watch server/index.js\"",
+    "dev:client": "vite",
+    "dev:server": "node --watch server/index.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

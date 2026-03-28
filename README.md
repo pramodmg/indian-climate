@@ -28,6 +28,9 @@ Open the local URL printed by Vite (usually `http://localhost:5173`).
 - **Favorite cities** — pin/unpin locations and switch to a favorites-only selector view; favorites are persisted in local storage
 - **City compare mode** — toggle a side-by-side comparison of any two cities; fetches the second city's live snapshot in parallel and renders a delta table (Δ B−A) for all key metrics; PM2.5 delta is color-coded better/worse
 - **Gamification** — XP system with 5 levels (Observer → Guardian), 8 achievement badges (First Look, City Hopper, Globe Trotter, Analyst, Pin Point, Alert Watcher, Streak Starter, All Zones), daily login streaks, and animated toast notifications on XP gain or badge unlock; progress persisted in local storage
+- **City risk leaderboard** — live ranking of cities by a composite stress score (heat, PM2.5, rainfall) with jump-to-city interaction
+- **Metric sparklines** — mini trendlines inside key metric cards (temperature, PM2.5, humidity, wind, rainfall) using last 8 local readings per city
+- **Alert history timeline** — persistent, filterable timeline of seen alerts (severity + city filters, clear history control)
 - **Live climate snapshot** — temperature, humidity, wind, rainfall, PM2.5, AQI, and risk level via Open-Meteo with offline fallback; backend-cached feed as intermediate source
 - **3-day forecast table**
 - **India map view** — interactive Leaflet map with state and district polygon overlays; color-coded by heatwave pressure, flood pressure, or air quality pressure; fly-to on city change
@@ -70,6 +73,9 @@ src/
     ForecastTable.tsx
     IndiaMapView.tsx          # Leaflet map with state + district overlays
     MetricCard.tsx
+    RiskLeaderboard.tsx       # composite risk ranking panel
+    AlertHistoryPanel.tsx     # persistent seen-alert timeline with filters
+    Sparkline.tsx             # lightweight SVG trendline renderer
   data/
     indiaCities.ts            # India cities + international cities (allClimateCities export)
     indiaOverlays.ts          # state and district boundary + metric data
@@ -77,9 +83,13 @@ src/
     ClimateDashboard.tsx
   services/
     alertEngine.ts            # client-side threshold evaluation
+    alertHistoryStore.ts      # localStorage persistence for historical alerts
     backendApi.ts             # typed fetch client for the backend
     climateApi.ts             # direct Open-Meteo fetch (fallback path)
     gamificationStore.ts      # XP store, levels, badges, localStorage persistence
+    leaderboardService.ts     # builds sorted leaderboard entries from cached snapshots
+    riskScoreService.ts       # composite risk score calculation
+    sparklineStore.ts         # local sparkline data (last 8 points per city/metric)
   hooks/
     useXpToasts.ts            # toast queue hook (stable pushEvent via useCallback)
   types/

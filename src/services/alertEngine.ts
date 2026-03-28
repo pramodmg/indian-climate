@@ -110,7 +110,8 @@ export function generateRealtimeAlerts(
   }
 
   const airThreshold = realtimeAlertThresholds[2]
-  const airSeverity = inferSeverity(snapshot.pm25, airThreshold)
+  const pm25Value = snapshot.aqi.pollutants.pm25 ?? 0
+  const airSeverity = inferSeverity(pm25Value, airThreshold)
 
   if (airSeverity) {
     alerts.push({
@@ -128,7 +129,7 @@ export function generateRealtimeAlerts(
           : airSeverity === 'warning'
             ? airThreshold.warning
             : airThreshold.watch,
-      value: Number(snapshot.pm25.toFixed(1)),
+      value: Number(pm25Value.toFixed(1)),
       unit: airThreshold.unit,
       triggeredAt: nowIso,
     })
